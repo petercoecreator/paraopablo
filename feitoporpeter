@@ -1,0 +1,632 @@
+--[[
+    PETER KEY SYSTEM
+    Coloque este LocalScript dentro de StarterPlayerScripts.
+    Ele cria a GUI sozinho, então não precisa criar nada manualmente no Explorer.
+]]
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
+local StarterGui = game:GetService("StarterGui")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+----------------------------------------------------------------
+-- CONFIGURAÇÕES
+----------------------------------------------------------------
+local RESPOSTA_CORRETA = "sim" -- vamos comparar em lower case, então "sim" e "Sim" (e "SIM") funcionam
+local SOUND_ID = "rbxassetid://106412079335663"
+local MENSAGEM_FINAL = "PERDEU TEMPOOOO! Mas pra você não ficar triste fica com essa p-e-d-r-a-d-a! ass:Peter"
+
+----------------------------------------------------------------
+-- CRIAÇÃO DA GUI (versão bonita/chamativa)
+----------------------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "PeterKeyGui"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 999
+screenGui.Parent = playerGui
+
+local ativoKeyGui = true -- controla os loops de fundo/brilho enquanto a tela de key existir
+
+-- Fundo escurecido com leve gradiente
+local overlay = Instance.new("Frame")
+overlay.Name = "Overlay"
+overlay.Size = UDim2.new(1, 0, 1, 0)
+overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+overlay.BackgroundTransparency = 1
+overlay.ZIndex = 1
+overlay.Parent = screenGui
+
+local overlayGradient = Instance.new("UIGradient")
+overlayGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 5, 20)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 0)),
+})
+overlayGradient.Rotation = 45
+overlayGradient.Parent = overlay
+
+TweenService:Create(overlay, TweenInfo.new(0.5), {BackgroundTransparency = 0.35}):Play()
+
+-- Partículas/formas flutuando bem sutis atrás da janela (dão vida ao fundo)
+local containerParticulas = Instance.new("Frame")
+containerParticulas.Name = "ParticulasFundo"
+containerParticulas.Size = UDim2.new(1, 0, 1, 0)
+containerParticulas.BackgroundTransparency = 1
+containerParticulas.ZIndex = 1
+containerParticulas.Parent = screenGui
+
+for i = 1, 10 do
+    local orbe = Instance.new("Frame")
+    orbe.Size = UDim2.new(0, math.random(20, 60), 0, math.random(20, 60))
+    orbe.Position = UDim2.new(math.random(), 0, math.random(), 0)
+    orbe.AnchorPoint = Vector2.new(0.5, 0.5)
+    orbe.BackgroundColor3 = Color3.fromRGB(255, 60, 120)
+    orbe.BackgroundTransparency = 0.85
+    orbe.ZIndex = 1
+    orbe.Parent = containerParticulas
+
+    local orbeCorner = Instance.new("UICorner")
+    orbeCorner.CornerRadius = UDim.new(1, 0)
+    orbeCorner.Parent = orbe
+
+    task.spawn(function()
+        while ativoKeyGui and orbe.Parent do
+            local tween = TweenService:Create(orbe, TweenInfo.new(math.random(30, 60) / 10, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                Position = UDim2.new(math.random(), 0, math.random(), 0),
+                BackgroundColor3 = Color3.fromHSV(math.random(), 0.6, 1),
+            })
+            tween:Play()
+            tween.Completed:Wait()
+        end
+    end)
+end
+
+-- Frame de "brilho"/glow atrás da janela principal (dá profundidade)
+local glow = Instance.new("Frame")
+glow.Name = "Glow"
+glow.AnchorPoint = Vector2.new(0.5, 0.5)
+glow.Position = UDim2.new(0.5, 0, 0.5, 0)
+glow.Size = UDim2.new(0, 500, 0, 300)
+glow.BackgroundColor3 = Color3.fromRGB(255, 60, 90)
+glow.BackgroundTransparency = 0.6
+glow.ZIndex = 1
+glow.Parent = screenGui
+
+local glowCorner = Instance.new("UICorner")
+glowCorner.CornerRadius = UDim.new(0, 30)
+glowCorner.Parent = glow
+
+task.spawn(function()
+    local hueGlow = 0
+    while ativoKeyGui and glow.Parent do
+        hueGlow = (hueGlow + 0.003) % 1
+        glow.BackgroundColor3 = Color3.fromHSV(hueGlow, 0.8, 1)
+        task.wait(0.03)
+    end
+end)
+
+task.spawn(function()
+    while ativoKeyGui and glow.Parent do
+        local tween1 = TweenService:Create(glow, TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+            Size = UDim2.new(0, 520, 0, 320),
+            BackgroundTransparency = 0.7,
+        })
+        tween1:Play()
+        tween1.Completed:Wait()
+        local tween2 = TweenService:Create(glow, TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+            Size = UDim2.new(0, 480, 0, 290),
+            BackgroundTransparency = 0.6,
+        })
+        tween2:Play()
+        tween2.Completed:Wait()
+    end
+end)
+
+-- Frame principal (janela da key) — vidro escuro com gradiente
+local frame = Instance.new("Frame")
+frame.Name = "JanelaKey"
+frame.AnchorPoint = Vector2.new(0.5, 0.5)
+frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+frame.Size = UDim2.new(0, 0, 0, 0) -- começa em 0 pra fazer a entrada animada
+frame.Rotation = 15
+frame.BackgroundColor3 = Color3.fromRGB(20, 18, 26)
+frame.BorderSizePixel = 0
+frame.ZIndex = 2
+frame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 22)
+corner.Parent = frame
+
+local frameGradient = Instance.new("UIGradient")
+frameGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 25, 45)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 10, 16)),
+})
+frameGradient.Rotation = 100
+frameGradient.Parent = frame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(255, 60, 60)
+stroke.Thickness = 2.5
+stroke.Parent = frame
+
+local strokeGradient = Instance.new("UIGradient")
+strokeGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 60, 120)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 200, 60)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 60, 255)),
+})
+strokeGradient.Parent = stroke
+
+task.spawn(function()
+    while ativoKeyGui and stroke.Parent do
+        strokeGradient.Rotation = (strokeGradient.Rotation + 3) % 360
+        task.wait(0.03)
+    end
+end)
+
+-- ENTRADA ANIMADA da janela (bounce chamativo)
+TweenService:Create(frame, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    Size = UDim2.new(0, 460, 0, 280),
+    Rotation = 0,
+}):Play()
+
+-- Ícone de cadeado flutuando/balançando
+local icone = Instance.new("TextLabel")
+icone.Name = "Icone"
+icone.Size = UDim2.new(0, 40, 0, 40)
+icone.Position = UDim2.new(0.5, 0, 0, 8)
+icone.AnchorPoint = Vector2.new(0.5, 0)
+icone.BackgroundTransparency = 1
+icone.Text = "🔒"
+icone.TextScaled = true
+icone.ZIndex = 2
+icone.Parent = frame
+
+task.spawn(function()
+    while ativoKeyGui and icone.Parent do
+        local t1 = TweenService:Create(icone, TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {Rotation = 12})
+        t1:Play()
+        t1.Completed:Wait()
+        local t2 = TweenService:Create(icone, TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {Rotation = -12})
+        t2:Play()
+        t2.Completed:Wait()
+    end
+end)
+
+-- Título com gradiente de cor no texto
+local titulo = Instance.new("TextLabel")
+titulo.Name = "Titulo"
+titulo.Size = UDim2.new(1, -20, 0, 38)
+titulo.Position = UDim2.new(0, 10, 0, 48)
+titulo.BackgroundTransparency = 1
+titulo.Text = "VERIFICAÇÃO DE KEY"
+titulo.TextColor3 = Color3.fromRGB(255, 255, 255)
+titulo.Font = Enum.Font.GothamBlack
+titulo.TextScaled = true
+titulo.ZIndex = 2
+titulo.Parent = frame
+
+local tituloGradient = Instance.new("UIGradient")
+tituloGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 90, 90)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 200, 80)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 90, 255)),
+})
+tituloGradient.Parent = titulo
+
+local tituloStroke = Instance.new("UIStroke")
+tituloStroke.Color = Color3.fromRGB(0, 0, 0)
+tituloStroke.Thickness = 1.5
+tituloStroke.Parent = titulo
+
+-- Pergunta
+local pergunta = Instance.new("TextLabel")
+pergunta.Name = "Pergunta"
+pergunta.Size = UDim2.new(1, -50, 0, 70)
+pergunta.Position = UDim2.new(0, 25, 0, 92)
+pergunta.BackgroundTransparency = 1
+pergunta.Text = "Qual foi a coisa aleatória que o Peter falou na call?"
+pergunta.TextColor3 = Color3.fromRGB(230, 230, 235)
+pergunta.Font = Enum.Font.GothamMedium
+pergunta.TextWrapped = true
+pergunta.TextScaled = true
+pergunta.ZIndex = 2
+pergunta.Parent = frame
+
+-- Caixa de texto (input da key)
+local inputBox = Instance.new("TextBox")
+inputBox.Name = "InputKey"
+inputBox.Size = UDim2.new(1, -50, 0, 46)
+inputBox.Position = UDim2.new(0, 25, 0, 165)
+inputBox.BackgroundColor3 = Color3.fromRGB(30, 28, 36)
+inputBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+inputBox.PlaceholderText = "Digite a key aqui..."
+inputBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 150)
+inputBox.Font = Enum.Font.GothamMedium
+inputBox.TextScaled = true
+inputBox.ClearTextOnFocus = false
+inputBox.Text = ""
+inputBox.ZIndex = 2
+inputBox.Parent = frame
+
+local inputCorner = Instance.new("UICorner")
+inputCorner.CornerRadius = UDim.new(0, 12)
+inputCorner.Parent = inputBox
+
+local inputStroke = Instance.new("UIStroke")
+inputStroke.Color = Color3.fromRGB(60, 58, 68)
+inputStroke.Thickness = 1.5
+inputStroke.Parent = inputBox
+
+local inputPadding = Instance.new("UIPadding")
+inputPadding.PaddingLeft = UDim.new(0, 12)
+inputPadding.PaddingRight = UDim.new(0, 12)
+inputPadding.Parent = inputBox
+
+-- Brilho no input quando o player clica pra digitar
+inputBox.Focused:Connect(function()
+    TweenService:Create(inputStroke, TweenInfo.new(0.2), {
+        Color = Color3.fromRGB(255, 200, 60),
+        Thickness = 2.5,
+    }):Play()
+end)
+
+inputBox.FocusLost:Connect(function()
+    TweenService:Create(inputStroke, TweenInfo.new(0.2), {
+        Color = Color3.fromRGB(60, 58, 68),
+        Thickness = 1.5,
+    }):Play()
+end)
+
+-- Botão confirmar com gradiente e efeito hover
+local botao = Instance.new("TextButton")
+botao.Name = "Confirmar"
+botao.Size = UDim2.new(1, -50, 0, 46)
+botao.Position = UDim2.new(0, 25, 0, 220)
+botao.BackgroundColor3 = Color3.fromRGB(220, 40, 40)
+botao.Text = "CONFIRMAR"
+botao.TextColor3 = Color3.fromRGB(255, 255, 255)
+botao.Font = Enum.Font.GothamBlack
+botao.TextScaled = true
+botao.AutoButtonColor = false
+botao.ZIndex = 2
+botao.Parent = frame
+
+local botaoCorner = Instance.new("UICorner")
+botaoCorner.CornerRadius = UDim.new(0, 12)
+botaoCorner.Parent = botao
+
+local botaoGradient = Instance.new("UIGradient")
+botaoGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 70, 70)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 30, 90)),
+})
+botaoGradient.Rotation = 90
+botaoGradient.Parent = botao
+
+botao.MouseEnter:Connect(function()
+    TweenService:Create(botao, TweenInfo.new(0.15), {Size = UDim2.new(1, -40, 0, 50)}):Play()
+end)
+
+botao.MouseLeave:Connect(function()
+    TweenService:Create(botao, TweenInfo.new(0.15), {Size = UDim2.new(1, -50, 0, 46)}):Play()
+end)
+
+-- Label de erro (aparece se errar)
+local erroLabel = Instance.new("TextLabel")
+erroLabel.Name = "Erro"
+erroLabel.Size = UDim2.new(1, -50, 0, 20)
+erroLabel.Position = UDim2.new(0, 25, 0, 254)
+erroLabel.BackgroundTransparency = 1
+erroLabel.Text = "Key incorreta, tenta de novo!"
+erroLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+erroLabel.Font = Enum.Font.GothamBold
+erroLabel.TextScaled = true
+erroLabel.Visible = false
+erroLabel.ZIndex = 2
+erroLabel.Parent = frame
+
+----------------------------------------------------------------
+-- FUNÇÕES: travar mouse / esconder CoreGui / bloquear ESC
+----------------------------------------------------------------
+local ESC_ACTION_NAME = "BloquearEscPeter"
+
+local function travarTela()
+    -- Trava o mouse no centro e some com o cursor
+    UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+    UserInputService.MouseIconEnabled = false
+
+    -- Esconde TODA a interface padrão do Roblox (chat, mochila, playerlist, etc.)
+    pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+    end)
+
+    -- Bloqueia o menu do ESC (ele simplesmente não abre mais nada)
+    ContextActionService:BindActionAtPriority(
+        ESC_ACTION_NAME,
+        function()
+            return Enum.ContextActionResult.Sink
+        end,
+        false,
+        Enum.ContextActionPriority.High.Value,
+        Enum.KeyCode.Escape
+    )
+end
+
+local function destravarTela()
+    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+    UserInputService.MouseIconEnabled = true
+
+    pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
+    end)
+
+    ContextActionService:UnbindAction(ESC_ACTION_NAME)
+end
+
+----------------------------------------------------------------
+-- FUNÇÃO: animação de erro (shake na janela)
+----------------------------------------------------------------
+local function shakeErro()
+    erroLabel.Visible = true
+    local posOriginal = frame.Position
+    for i = 1, 4 do
+        local offset = (i % 2 == 0) and 10 or -10
+        TweenService:Create(frame, TweenInfo.new(0.05), {
+            Position = posOriginal + UDim2.new(0, offset, 0, 0)
+        }):Play()
+        task.wait(0.05)
+    end
+    TweenService:Create(frame, TweenInfo.new(0.05), {Position = posOriginal}):Play()
+end
+
+----------------------------------------------------------------
+-- FUNÇÃO: animação BOMBÁSTICA de sucesso
+----------------------------------------------------------------
+local function animacaoSucesso()
+    -- Trava o input
+    inputBox.TextEditable = false
+    botao.Active = false
+
+    -- Trava mouse, esconde CoreGui e bloqueia o ESC
+    travarTela()
+
+    -- Para os efeitos de fundo da tela de key (partículas, glow, brilho da borda)
+    ativoKeyGui = false
+    if glow then glow:Destroy() end
+    if containerParticulas then containerParticulas:Destroy() end
+    if overlay then overlay:Destroy() end
+
+    -- 1) A janela da key "explode" (escala + fade)
+    local tweenSaida = TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, 0, 0, 0),
+        Rotation = 360,
+    })
+    tweenSaida:Play()
+    tweenSaida.Completed:Wait()
+    frame.Visible = false
+
+    -- 2) Flash branco na tela inteira
+    local flash = Instance.new("Frame")
+    flash.Size = UDim2.new(1, 0, 1, 0)
+    flash.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    flash.BackgroundTransparency = 0
+    flash.ZIndex = 5
+    flash.Parent = screenGui
+
+    TweenService:Create(flash, TweenInfo.new(0.6, Enum.EasingStyle.Quad), {
+        BackgroundTransparency = 1
+    }):Play()
+    task.wait(0.6)
+    flash:Destroy()
+
+    -- 3) Frame final para a mensagem (fundo 100% OPACO, o jogo não aparece mais atrás)
+    local finalFrame = Instance.new("Frame")
+    finalFrame.Size = UDim2.new(1, 0, 1, 0)
+    finalFrame.BackgroundTransparency = 0
+    finalFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
+    finalFrame.ZIndex = 4
+    finalFrame.ClipsDescendants = true
+    finalFrame.Parent = screenGui
+
+    -- 3.1) EFEITOS PIKASSS: formas coloridas girando/piscando/voando atrás da mensagem
+    local ativo = true
+    finalFrame.AncestryChanged:Connect(function(_, parent)
+        if parent == nil then
+            ativo = false
+        end
+    end)
+
+    -- Fundo pulsando em arco-íris (cobre tudo, garante que não dá pra ver o jogo)
+    task.spawn(function()
+        local hueFundo = 0
+        while ativo and finalFrame.Parent do
+            hueFundo = (hueFundo + 0.004) % 1
+            finalFrame.BackgroundColor3 = Color3.fromHSV(hueFundo, 0.55, 0.25)
+            task.wait(0.03)
+        end
+    end)
+
+    -- Formas voadoras/girando (efeito rave / pikas)
+    local formas = {}
+    for i = 1, 14 do
+        local forma = Instance.new("Frame")
+        forma.Size = UDim2.new(0, math.random(40, 140), 0, math.random(40, 140))
+        forma.Position = UDim2.new(math.random(), 0, math.random(), 0)
+        forma.AnchorPoint = Vector2.new(0.5, 0.5)
+        forma.BackgroundColor3 = Color3.fromHSV(math.random(), 1, 1)
+        forma.BackgroundTransparency = 0.25
+        forma.ZIndex = 3
+        forma.Parent = finalFrame
+
+        local formaCorner = Instance.new("UICorner")
+        formaCorner.CornerRadius = (i % 2 == 0) and UDim.new(1, 0) or UDim.new(0, 12)
+        formaCorner.Parent = forma
+
+        table.insert(formas, forma)
+    end
+
+    for _, forma in ipairs(formas) do
+        task.spawn(function()
+            while ativo and forma.Parent do
+                local novaPos = UDim2.new(math.random(), 0, math.random(), 0)
+                local novaRot = math.random(-360, 360)
+                local novaCor = Color3.fromHSV(math.random(), 1, 1)
+
+                local tween = TweenService:Create(forma, TweenInfo.new(math.random(8, 20) / 10, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                    Position = novaPos,
+                    Rotation = novaRot,
+                    BackgroundColor3 = novaCor,
+                })
+                tween:Play()
+                tween.Completed:Wait()
+            end
+        end)
+    end
+
+    -- Flashes rápidos de cor por cima de tudo (efeito estroboscópico leve)
+    task.spawn(function()
+        while ativo and finalFrame.Parent do
+            local strobe = Instance.new("Frame")
+            strobe.Size = UDim2.new(1, 0, 1, 0)
+            strobe.BackgroundColor3 = Color3.fromHSV(math.random(), 1, 1)
+            strobe.BackgroundTransparency = 0.85
+            strobe.ZIndex = 4
+            strobe.Parent = finalFrame
+
+            TweenService:Create(strobe, TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
+            task.wait(0.15)
+            strobe:Destroy()
+            task.wait(math.random(2, 5) / 10)
+        end
+    end)
+
+    local mensagemLabel = Instance.new("TextLabel")
+    mensagemLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+    mensagemLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+    mensagemLabel.Size = UDim2.new(0, 0, 0, 0)
+    mensagemLabel.BackgroundTransparency = 1
+    mensagemLabel.Text = ""
+    mensagemLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+    mensagemLabel.Font = Enum.Font.GothamBlack
+    mensagemLabel.TextWrapped = true
+    mensagemLabel.TextScaled = true
+    mensagemLabel.ZIndex = 10 -- sempre acima dos efeitos PIKASSS
+    mensagemLabel.Parent = finalFrame
+
+    local outline = Instance.new("UIStroke")
+    outline.Color = Color3.fromRGB(0, 0, 0)
+    outline.Thickness = 3
+    outline.Parent = mensagemLabel
+
+    -- Fundo próprio atrás do texto (garante leitura mesmo com os efeitos loucos passando)
+    local caixaTexto = Instance.new("Frame")
+    caixaTexto.Size = UDim2.new(1, 40, 1, 40)
+    caixaTexto.Position = UDim2.new(0.5, 0, 0.5, 0)
+    caixaTexto.AnchorPoint = Vector2.new(0.5, 0.5)
+    caixaTexto.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    caixaTexto.BackgroundTransparency = 0.4
+    caixaTexto.ZIndex = 9
+    caixaTexto.Parent = mensagemLabel
+
+    local caixaCorner = Instance.new("UICorner")
+    caixaCorner.CornerRadius = UDim.new(0, 20)
+    caixaCorner.Parent = caixaTexto
+
+    -- Painel entra crescendo
+    TweenService:Create(mensagemLabel, TweenInfo.new(0.7, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0.85, 0, 0.5, 0)
+    }):Play()
+    task.wait(0.4)
+
+    -- 4) Efeito "máquina de escrever" pra escrever a mensagem
+    local textoAtual = ""
+    for i = 1, #MENSAGEM_FINAL do
+        textoAtual = MENSAGEM_FINAL:sub(1, i)
+        mensagemLabel.Text = textoAtual
+        task.wait(0.02)
+    end
+
+    -- 5) Toca o som ID 106412079335663
+    local som = Instance.new("Sound")
+    som.Name = "PedradaSound"
+    som.SoundId = SOUND_ID
+    som.Volume = 1
+    som.Looped = false
+    som.Parent = SoundService
+
+    -- Já entra tocando 25 segundos adiantado
+    som.TimePosition = 25
+    som:Play()
+
+    -- 6) Efeito contínuo de cor piscando (rainbow) + leve tremor no texto enquanto o som toca
+    task.spawn(function()
+        local hue = 0
+        while mensagemLabel.Parent do
+            hue = (hue + 0.01) % 1
+            mensagemLabel.TextColor3 = Color3.fromHSV(hue, 0.8, 1)
+            task.wait(0.03)
+        end
+    end)
+
+    task.spawn(function()
+        local posOriginal = mensagemLabel.Position
+        while mensagemLabel.Parent do
+            local offsetX = math.random(-4, 4)
+            local offsetY = math.random(-4, 4)
+            mensagemLabel.Position = posOriginal + UDim2.new(0, offsetX, 0, offsetY)
+            task.wait(0.05)
+        end
+    end)
+
+    -- 7) Zoom pulsante contínuo (efeito "vivo")
+    task.spawn(function()
+        while mensagemLabel.Parent do
+            TweenService:Create(mensagemLabel, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                Size = UDim2.new(0.88, 0, 0.53, 0)
+            }):Play()
+            task.wait(0.8)
+            TweenService:Create(mensagemLabel, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                Size = UDim2.new(0.85, 0, 0.5, 0)
+            }):Play()
+            task.wait(0.8)
+        end
+    end)
+
+    -- Remove tudo automaticamente quando o som terminar
+    som.Ended:Connect(function()
+        task.wait(2) -- deixa a mensagem mais um pouco na tela depois do som acabar
+        finalFrame:Destroy()
+        som:Destroy()
+        destravarTela() -- devolve o controle do mouse e a interface do Roblox
+    end)
+end
+
+----------------------------------------------------------------
+-- LÓGICA DE VALIDAÇÃO DA KEY
+----------------------------------------------------------------
+local function verificarKey()
+    local textoDigitado = inputBox.Text:lower():gsub("%s+", "") -- remove espaços e deixa minúsculo
+
+    if textoDigitado == RESPOSTA_CORRETA then
+        erroLabel.Visible = false
+        animacaoSucesso()
+    else
+        shakeErro()
+    end
+end
+
+botao.MouseButton1Click:Connect(verificarKey)
+
+inputBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        verificarKey()
+    end
+end)
