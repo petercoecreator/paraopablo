@@ -1,7 +1,14 @@
 --[[
-    PETER KEY SYSTEM
+    PETER KEY SYSTEM (com Labirinto + Pergunta da Idade)
     Coloque este LocalScript dentro de StarterPlayerScripts.
-    Ele cria a GUI sozinho, então não precisa criar nada manualmente no Explorer.
+    Ele cria todas as GUIs sozinho, então não precisa criar nada manualmente no Explorer.
+
+    FLUXO:
+    1) Tela pedindo a "key" (resposta: "sim")
+    2) Labirinto: controla a minhoca com WASD/Setas até o ✅ verde.
+       Se encostar em qualquer parede, ela volta pro INÍCIO e tem que refazer tudo.
+    3) Pergunta: "Quantos anos tem o Peter?" (resposta: 15)
+    4) Mensagem final + música (a mesma animação bombástica de antes)
 ]]
 
 local Players = game:GetService("Players")
@@ -10,6 +17,7 @@ local SoundService = game:GetService("SoundService")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
 local StarterGui = game:GetService("StarterGui")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -18,11 +26,14 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- CONFIGURAÇÕES
 ----------------------------------------------------------------
 local RESPOSTA_CORRETA = "sim" -- vamos comparar em lower case, então "sim" e "Sim" (e "SIM") funcionam
+local IDADE_CORRETA = "15"
 local SOUND_ID = "rbxassetid://106412079335663"
 local MENSAGEM_FINAL = "PERDEU TEMPOOOO! Mas pra você não ficar triste fica com essa p-e-d-r-a-d-a! ass:Peter"
+local SOM_FRUTA_ID = "rbxassetid://109608870356288" -- toca quando pega uma fruta
+local SOM_ERRO_ID = "rbxassetid://131661013076677" -- toca quando pega um quadrado (erro)
 
 ----------------------------------------------------------------
--- CRIAÇÃO DA GUI (versão bonita/chamativa)
+-- CRIAÇÃO DA GUI (versão bonita/chamativa) - TELA DA KEY
 ----------------------------------------------------------------
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "PeterKeyGui"
@@ -372,46 +383,36 @@ local function destravarTela()
 end
 
 ----------------------------------------------------------------
--- FUNÇÃO: animação de erro (shake na janela)
+-- FUNÇÃO: animação de erro (shake na janela) - genérica, recebe o frame alvo
 ----------------------------------------------------------------
-local function shakeErro()
-    erroLabel.Visible = true
-    local posOriginal = frame.Position
+local function shakeFrame(alvoFrame, alvoErroLabel)
+    if alvoErroLabel then
+        alvoErroLabel.Visible = true
+    end
+    local posOriginal = alvoFrame.Position
     for i = 1, 4 do
         local offset = (i % 2 == 0) and 10 or -10
-        TweenService:Create(frame, TweenInfo.new(0.05), {
+        TweenService:Create(alvoFrame, TweenInfo.new(0.05), {
             Position = posOriginal + UDim2.new(0, offset, 0, 0)
         }):Play()
         task.wait(0.05)
     end
-    TweenService:Create(frame, TweenInfo.new(0.05), {Position = posOriginal}):Play()
+    TweenService:Create(alvoFrame, TweenInfo.new(0.05), {Position = posOriginal}):Play()
 end
 
 ----------------------------------------------------------------
--- FUNÇÃO: animação BOMBÁSTICA de sucesso
+-- FUNÇÃO: animação BOMBÁSTICA de sucesso (mensagem final + música)
 ----------------------------------------------------------------
 local function animacaoSucesso()
-    -- Trava o input
-    inputBox.TextEditable = false
-    botao.Active = false
-
     -- Trava mouse, esconde CoreGui e bloqueia o ESC
     travarTela()
 
-    -- Para os efeitos de fundo da tela de key (partículas, glow, brilho da borda)
-    ativoKeyGui = false
-    if glow then glow:Destroy() end
-    if containerParticulas then containerParticulas:Destroy() end
-    if overlay then overlay:Destroy() end
-
-    -- 1) A janela da key "explode" (escala + fade)
-    local tweenSaida = TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-        Size = UDim2.new(0, 0, 0, 0),
-        Rotation = 360,
-    })
-    tweenSaida:Play()
-    tweenSaida.Completed:Wait()
-    frame.Visible = false
+    local screenGuiFinal = Instance.new("ScreenGui")
+    screenGuiFinal.Name = "PeterFinalGui"
+    screenGuiFinal.ResetOnSpawn = false
+    screenGuiFinal.IgnoreGuiInset = true
+    screenGuiFinal.DisplayOrder = 999
+    screenGuiFinal.Parent = playerGui
 
     -- 2) Flash branco na tela inteira
     local flash = Instance.new("Frame")
@@ -419,7 +420,7 @@ local function animacaoSucesso()
     flash.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     flash.BackgroundTransparency = 0
     flash.ZIndex = 5
-    flash.Parent = screenGui
+    flash.Parent = screenGuiFinal
 
     TweenService:Create(flash, TweenInfo.new(0.6, Enum.EasingStyle.Quad), {
         BackgroundTransparency = 1
@@ -434,7 +435,7 @@ local function animacaoSucesso()
     finalFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
     finalFrame.ZIndex = 4
     finalFrame.ClipsDescendants = true
-    finalFrame.Parent = screenGui
+    finalFrame.Parent = screenGuiFinal
 
     -- 3.1) EFEITOS PIKASSS: formas coloridas girando/piscando/voando atrás da mensagem
     local ativo = true
@@ -610,16 +611,785 @@ local function animacaoSucesso()
 end
 
 ----------------------------------------------------------------
--- LÓGICA DE VALIDAÇÃO DA KEY
+-- ETAPA 3: PERGUNTA DA IDADE DO PETER
+----------------------------------------------------------------
+local function abrirPerguntaIdade()
+    local guiIdade = Instance.new("ScreenGui")
+    guiIdade.Name = "PeterIdadeGui"
+    guiIdade.ResetOnSpawn = false
+    guiIdade.IgnoreGuiInset = true
+    guiIdade.DisplayOrder = 999
+    guiIdade.Parent = playerGui
+
+    local overlayIdade = Instance.new("Frame")
+    overlayIdade.Size = UDim2.new(1, 0, 1, 0)
+    overlayIdade.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    overlayIdade.BackgroundTransparency = 1
+    overlayIdade.ZIndex = 1
+    overlayIdade.Parent = guiIdade
+    TweenService:Create(overlayIdade, TweenInfo.new(0.4), {BackgroundTransparency = 0.35}):Play()
+
+    local frameIdade = Instance.new("Frame")
+    frameIdade.AnchorPoint = Vector2.new(0.5, 0.5)
+    frameIdade.Position = UDim2.new(0.5, 0, 0.5, 0)
+    frameIdade.Size = UDim2.new(0, 0, 0, 0)
+    frameIdade.BackgroundColor3 = Color3.fromRGB(20, 18, 26)
+    frameIdade.BorderSizePixel = 0
+    frameIdade.ZIndex = 2
+    frameIdade.Parent = guiIdade
+
+    local cornerIdade = Instance.new("UICorner")
+    cornerIdade.CornerRadius = UDim.new(0, 22)
+    cornerIdade.Parent = frameIdade
+
+    local strokeIdade = Instance.new("UIStroke")
+    strokeIdade.Color = Color3.fromRGB(255, 60, 60)
+    strokeIdade.Thickness = 2.5
+    strokeIdade.Parent = frameIdade
+
+    local strokeIdadeGradient = Instance.new("UIGradient")
+    strokeIdadeGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 60, 120)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 200, 60)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 60, 255)),
+    })
+    strokeIdadeGradient.Parent = strokeIdade
+
+    local rodandoIdade = true
+    task.spawn(function()
+        while rodandoIdade and strokeIdade.Parent do
+            strokeIdadeGradient.Rotation = (strokeIdadeGradient.Rotation + 3) % 360
+            task.wait(0.03)
+        end
+    end)
+
+    TweenService:Create(frameIdade, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, 420, 0, 250),
+    }):Play()
+
+    local tituloIdade = Instance.new("TextLabel")
+    tituloIdade.Size = UDim2.new(1, -20, 0, 40)
+    tituloIdade.Position = UDim2.new(0, 10, 0, 20)
+    tituloIdade.BackgroundTransparency = 1
+    tituloIdade.Text = "ÚLTIMA PERGUNTA"
+    tituloIdade.TextColor3 = Color3.fromRGB(255, 255, 255)
+    tituloIdade.Font = Enum.Font.GothamBlack
+    tituloIdade.TextScaled = true
+    tituloIdade.ZIndex = 2
+    tituloIdade.Parent = frameIdade
+
+    local perguntaIdade = Instance.new("TextLabel")
+    perguntaIdade.Size = UDim2.new(1, -50, 0, 55)
+    perguntaIdade.Position = UDim2.new(0, 25, 0, 68)
+    perguntaIdade.BackgroundTransparency = 1
+    perguntaIdade.Text = "Quantos anos tem o Peter?"
+    perguntaIdade.TextColor3 = Color3.fromRGB(230, 230, 235)
+    perguntaIdade.Font = Enum.Font.GothamMedium
+    perguntaIdade.TextWrapped = true
+    perguntaIdade.TextScaled = true
+    perguntaIdade.ZIndex = 2
+    perguntaIdade.Parent = frameIdade
+
+    local inputIdade = Instance.new("TextBox")
+    inputIdade.Size = UDim2.new(1, -50, 0, 46)
+    inputIdade.Position = UDim2.new(0, 25, 0, 128)
+    inputIdade.BackgroundColor3 = Color3.fromRGB(30, 28, 36)
+    inputIdade.TextColor3 = Color3.fromRGB(255, 255, 255)
+    inputIdade.PlaceholderText = "Digite a idade..."
+    inputIdade.PlaceholderColor3 = Color3.fromRGB(140, 140, 150)
+    inputIdade.Font = Enum.Font.GothamMedium
+    inputIdade.TextScaled = true
+    inputIdade.ClearTextOnFocus = false
+    inputIdade.Text = ""
+    inputIdade.ZIndex = 2
+    inputIdade.Parent = frameIdade
+
+    local inputIdadeCorner = Instance.new("UICorner")
+    inputIdadeCorner.CornerRadius = UDim.new(0, 12)
+    inputIdadeCorner.Parent = inputIdade
+
+    local inputIdadeStroke = Instance.new("UIStroke")
+    inputIdadeStroke.Color = Color3.fromRGB(60, 58, 68)
+    inputIdadeStroke.Thickness = 1.5
+    inputIdadeStroke.Parent = inputIdade
+
+    local inputIdadePadding = Instance.new("UIPadding")
+    inputIdadePadding.PaddingLeft = UDim.new(0, 12)
+    inputIdadePadding.PaddingRight = UDim.new(0, 12)
+    inputIdadePadding.Parent = inputIdade
+
+    inputIdade.Focused:Connect(function()
+        TweenService:Create(inputIdadeStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(255, 200, 60), Thickness = 2.5}):Play()
+    end)
+    inputIdade.FocusLost:Connect(function(enterPressed)
+        TweenService:Create(inputIdadeStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(60, 58, 68), Thickness = 1.5}):Play()
+    end)
+
+    local botaoIdade = Instance.new("TextButton")
+    botaoIdade.Size = UDim2.new(1, -50, 0, 46)
+    botaoIdade.Position = UDim2.new(0, 25, 0, 182)
+    botaoIdade.BackgroundColor3 = Color3.fromRGB(220, 40, 40)
+    botaoIdade.Text = "CONFIRMAR"
+    botaoIdade.TextColor3 = Color3.fromRGB(255, 255, 255)
+    botaoIdade.Font = Enum.Font.GothamBlack
+    botaoIdade.TextScaled = true
+    botaoIdade.AutoButtonColor = false
+    botaoIdade.ZIndex = 2
+    botaoIdade.Parent = frameIdade
+
+    local botaoIdadeCorner = Instance.new("UICorner")
+    botaoIdadeCorner.CornerRadius = UDim.new(0, 12)
+    botaoIdadeCorner.Parent = botaoIdade
+
+    local botaoIdadeGradient = Instance.new("UIGradient")
+    botaoIdadeGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 70, 70)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 30, 90)),
+    })
+    botaoIdadeGradient.Rotation = 90
+    botaoIdadeGradient.Parent = botaoIdade
+
+    local erroIdade = Instance.new("TextLabel")
+    erroIdade.Size = UDim2.new(1, -50, 0, 20)
+    erroIdade.Position = UDim2.new(0, 25, 0, 216)
+    erroIdade.BackgroundTransparency = 1
+    erroIdade.Text = "Resposta errada, pensa direito!"
+    erroIdade.TextColor3 = Color3.fromRGB(255, 100, 100)
+    erroIdade.Font = Enum.Font.GothamBold
+    erroIdade.TextScaled = true
+    erroIdade.Visible = false
+    erroIdade.ZIndex = 2
+    erroIdade.Parent = frameIdade
+
+    local function verificarIdade()
+        local texto = inputIdade.Text:lower():gsub("%s+", "")
+        -- aceita "15", "15 anos", etc. já que removemos espaços; extrai só números pra comparar
+        local numeros = texto:match("%d+")
+        if texto == IDADE_CORRETA or numeros == IDADE_CORRETA then
+            rodandoIdade = false
+            guiIdade:Destroy()
+            animacaoSucesso()
+        else
+            shakeFrame(frameIdade, erroIdade)
+        end
+    end
+
+    botaoIdade.MouseButton1Click:Connect(verificarIdade)
+    inputIdade.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            verificarIdade()
+        end
+    end)
+end
+
+----------------------------------------------------------------
+-- ETAPA 3 (na verdade a 3ª de 4): JOGO DE PEGAR FRUTAS
+----------------------------------------------------------------
+-- Boneco controlado por WASD/setas, frutas caem do céu (+1 ponto),
+-- quadrados caem também (zera a pontuação). Meta: 50 frutas.
+local META_FRUTAS = 50
+
+local function abrirJogoFrutas()
+    local guiFrutas = Instance.new("ScreenGui")
+    guiFrutas.Name = "PeterFrutasGui"
+    guiFrutas.ResetOnSpawn = false
+    guiFrutas.IgnoreGuiInset = true
+    guiFrutas.DisplayOrder = 999
+    guiFrutas.Parent = playerGui
+
+    local overlayFrutas = Instance.new("Frame")
+    overlayFrutas.Size = UDim2.new(1, 0, 1, 0)
+    overlayFrutas.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
+    overlayFrutas.BackgroundTransparency = 0.15
+    overlayFrutas.ZIndex = 1
+    overlayFrutas.Parent = guiFrutas
+
+    local PLAY_W, PLAY_H = 480, 560
+
+    local areaJogo = Instance.new("Frame")
+    areaJogo.Name = "AreaJogo"
+    areaJogo.AnchorPoint = Vector2.new(0.5, 0)
+    areaJogo.Position = UDim2.new(0.5, 0, 0, 150)
+    areaJogo.Size = UDim2.new(0, PLAY_W, 0, PLAY_H)
+    areaJogo.BackgroundColor3 = Color3.fromRGB(20, 30, 45)
+    areaJogo.ClipsDescendants = true
+    areaJogo.ZIndex = 2
+    areaJogo.Parent = guiFrutas
+
+    local areaCorner = Instance.new("UICorner")
+    areaCorner.CornerRadius = UDim.new(0, 16)
+    areaCorner.Parent = areaJogo
+
+    local areaGradient = Instance.new("UIGradient")
+    areaGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 110, 190)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 20, 35)),
+    })
+    areaGradient.Rotation = 90
+    areaGradient.Parent = areaJogo
+
+    local areaStroke = Instance.new("UIStroke")
+    areaStroke.Color = Color3.fromRGB(120, 200, 255)
+    areaStroke.Thickness = 3
+    areaStroke.Parent = areaJogo
+
+    -- cabeçalho (instrução + placares) fica FORA da área que corta o conteúdo,
+    -- senão os textos ficariam invisíveis (a área do jogo corta tudo que passa da borda)
+    local instrucaoFrutas = Instance.new("TextLabel")
+    instrucaoFrutas.Size = UDim2.new(0, PLAY_W, 0, 34)
+    instrucaoFrutas.Position = UDim2.new(0.5, 0, 0, 8)
+    instrucaoFrutas.AnchorPoint = Vector2.new(0.5, 0)
+    instrucaoFrutas.BackgroundTransparency = 1
+    instrucaoFrutas.Text = "Use WASD ou as SETAS pra pegar as frutas 🍎 e desviar dos quadrados ☠️!"
+    instrucaoFrutas.TextColor3 = Color3.fromRGB(220, 220, 230)
+    instrucaoFrutas.Font = Enum.Font.GothamMedium
+    instrucaoFrutas.TextWrapped = true
+    instrucaoFrutas.TextScaled = true
+    instrucaoFrutas.ZIndex = 3
+    instrucaoFrutas.Parent = guiFrutas
+
+    local placarLabel = Instance.new("TextLabel")
+    placarLabel.Size = UDim2.new(0, PLAY_W, 0, 44)
+    placarLabel.Position = UDim2.new(0.5, 0, 0, 50)
+    placarLabel.AnchorPoint = Vector2.new(0.5, 0)
+    placarLabel.BackgroundTransparency = 1
+    placarLabel.Text = "🍓 0 / " .. META_FRUTAS
+    placarLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    placarLabel.Font = Enum.Font.GothamBlack
+    placarLabel.TextScaled = true
+    placarLabel.ZIndex = 3
+    placarLabel.Parent = guiFrutas
+
+    -- contador que NÃO zera com erro, só soma toda fruta pega
+    local contadorLabel = Instance.new("TextLabel")
+    contadorLabel.Size = UDim2.new(0, PLAY_W, 0, 28)
+    contadorLabel.Position = UDim2.new(0.5, 0, 0, 98)
+    contadorLabel.AnchorPoint = Vector2.new(0.5, 0)
+    contadorLabel.BackgroundTransparency = 1
+    contadorLabel.Text = "Frutas pegas no total: 0"
+    contadorLabel.TextColor3 = Color3.fromRGB(180, 255, 180)
+    contadorLabel.Font = Enum.Font.GothamBold
+    contadorLabel.TextScaled = true
+    contadorLabel.ZIndex = 3
+    contadorLabel.Parent = guiFrutas
+
+    -- boneco (player)
+    local bonecoSize = 56
+    local bonecoX = PLAY_W / 2
+    local bonecoY = PLAY_H - 70
+
+    local boneco = Instance.new("Frame")
+    boneco.Name = "Boneco"
+    boneco.Size = UDim2.new(0, bonecoSize, 0, bonecoSize)
+    boneco.AnchorPoint = Vector2.new(0.5, 0.5)
+    boneco.Position = UDim2.new(0, bonecoX, 0, bonecoY)
+    boneco.BackgroundColor3 = Color3.fromRGB(255, 210, 120)
+    boneco.BorderSizePixel = 0
+    boneco.ZIndex = 4
+    boneco.Parent = areaJogo
+
+    local bonecoCorner = Instance.new("UICorner")
+    bonecoCorner.CornerRadius = UDim.new(0.3, 0)
+    bonecoCorner.Parent = boneco
+
+    local bonecoStroke = Instance.new("UIStroke")
+    bonecoStroke.Color = Color3.fromRGB(140, 90, 20)
+    bonecoStroke.Thickness = 2
+    bonecoStroke.Parent = boneco
+
+    local bonecoFace = Instance.new("TextLabel")
+    bonecoFace.Size = UDim2.new(1, 0, 1, 0)
+    bonecoFace.BackgroundTransparency = 1
+    bonecoFace.Text = "🙂"
+    bonecoFace.TextScaled = true
+    bonecoFace.ZIndex = 4
+    bonecoFace.Parent = boneco
+
+    -- sons (uma instância de cada, reaproveitada a cada acerto/erro)
+    local somFruta = Instance.new("Sound")
+    somFruta.Name = "SomFruta"
+    somFruta.SoundId = SOM_FRUTA_ID
+    somFruta.Volume = 1
+    somFruta.Parent = SoundService
+
+    local somErro = Instance.new("Sound")
+    somErro.Name = "SomErro"
+    somErro.SoundId = SOM_ERRO_ID
+    somErro.Volume = 1
+    somErro.Parent = SoundService
+
+    guiFrutas.Destroying:Connect(function()
+        somFruta:Destroy()
+        somErro:Destroy()
+    end)
+
+    -- controles
+    local teclasF = {w = false, a = false, s = false, d = false, up = false, left = false, down = false, right = false}
+
+    local function mapKeyF(keyCode)
+        if keyCode == Enum.KeyCode.W then return "w"
+        elseif keyCode == Enum.KeyCode.A then return "a"
+        elseif keyCode == Enum.KeyCode.S then return "s"
+        elseif keyCode == Enum.KeyCode.D then return "d"
+        elseif keyCode == Enum.KeyCode.Up then return "up"
+        elseif keyCode == Enum.KeyCode.Left then return "left"
+        elseif keyCode == Enum.KeyCode.Down then return "down"
+        elseif keyCode == Enum.KeyCode.Right then return "right"
+        end
+        return nil
+    end
+
+    local conInputBeganF = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        local k = mapKeyF(input.KeyCode)
+        if k then teclasF[k] = true end
+    end)
+
+    local conInputEndedF = UserInputService.InputEnded:Connect(function(input, gameProcessed)
+        local k = mapKeyF(input.KeyCode)
+        if k then teclasF[k] = false end
+    end)
+
+    local velocidadeBoneco = 260
+
+    -- pontuação
+    local pontos = 0
+    local totalPego = 0
+    local jogoConcluido = false
+
+    local function atualizarPlacar()
+        placarLabel.Text = "🍓 " .. pontos .. " / " .. META_FRUTAS
+        contadorLabel.Text = "Frutas pegas no total: " .. totalPego
+    end
+
+    local function penalidade()
+        somErro.TimePosition = 0
+        somErro:Play()
+        pontos = 0
+        atualizarPlacar()
+        TweenService:Create(placarLabel, TweenInfo.new(0.1), {TextColor3 = Color3.fromRGB(255, 80, 80)}):Play()
+        task.delay(0.3, function()
+            if placarLabel.Parent then
+                TweenService:Create(placarLabel, TweenInfo.new(0.25), {TextColor3 = Color3.fromRGB(255, 255, 255)}):Play()
+            end
+        end)
+        task.spawn(function()
+            shakeFrame(areaJogo, nil)
+        end)
+    end
+
+    -- itens caindo (frutas e quadrados)
+    local FRUTAS_EMOJIS = {"🍎", "🍌", "🍇", "🍓", "🍊", "🍉", "🍒", "🍑"}
+    local itensAtivos = {}
+
+    local function spawnItem()
+        local ehFruta = math.random() < 0.75
+        local tamanho = 40
+
+        local item = Instance.new("Frame")
+        item.Size = UDim2.new(0, tamanho, 0, tamanho)
+        item.AnchorPoint = Vector2.new(0.5, 0.5)
+        local xInicial = math.random(tamanho, PLAY_W - tamanho)
+        item.Position = UDim2.new(0, xInicial, 0, -tamanho)
+        item.BackgroundTransparency = 1
+        item.ZIndex = 3
+        item.Parent = areaJogo
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.BackgroundTransparency = 1
+        label.TextScaled = true
+        label.ZIndex = 3
+        label.Parent = item
+
+        if ehFruta then
+            label.Text = FRUTAS_EMOJIS[math.random(1, #FRUTAS_EMOJIS)]
+        else
+            item.BackgroundTransparency = 0
+            item.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+            local itemCorner = Instance.new("UICorner")
+            itemCorner.CornerRadius = UDim.new(0, 6)
+            itemCorner.Parent = item
+            label.Text = "☠️"
+        end
+
+        table.insert(itensAtivos, {
+            instancia = item,
+            x = xInicial,
+            y = -tamanho,
+            tamanho = tamanho,
+            ehFruta = ehFruta,
+            pego = false,
+        })
+    end
+
+    local VELOCIDADE_QUEDA = 130 -- pixels por segundo (mais baixo = mais fácil de alcançar)
+    local acumuladorSpawn = 0
+    local proximoSpawn = 0.9
+
+    local conHeartbeatF
+    conHeartbeatF = RunService.Heartbeat:Connect(function(dt)
+        if jogoConcluido then return end
+
+        -- mover boneco (livre nos dois eixos dentro da área)
+        local dx = 0
+        if teclasF.a or teclasF.left then dx = dx - 1 end
+        if teclasF.d or teclasF.right then dx = dx + 1 end
+        local dy = 0
+        if teclasF.w or teclasF.up then dy = dy - 1 end
+        if teclasF.s or teclasF.down then dy = dy + 1 end
+
+        if dx ~= 0 or dy ~= 0 then
+            local comprimento = math.sqrt(dx * dx + dy * dy)
+            dx = (dx / comprimento) * velocidadeBoneco * dt
+            dy = (dy / comprimento) * velocidadeBoneco * dt
+            bonecoX = math.clamp(bonecoX + dx, bonecoSize / 2, PLAY_W - bonecoSize / 2)
+            bonecoY = math.clamp(bonecoY + dy, bonecoSize / 2, PLAY_H - bonecoSize / 2)
+            boneco.Position = UDim2.new(0, bonecoX, 0, bonecoY)
+        end
+
+        -- spawna novos itens periodicamente
+        acumuladorSpawn = acumuladorSpawn + dt
+        if acumuladorSpawn >= proximoSpawn then
+            acumuladorSpawn = 0
+            proximoSpawn = math.random(80, 130) / 100 -- 0.8s a 1.3s entre cada item novo
+            spawnItem()
+        end
+
+        -- move os itens e checa colisão com o boneco
+        for i = #itensAtivos, 1, -1 do
+            local it = itensAtivos[i]
+            it.y = it.y + VELOCIDADE_QUEDA * dt
+            it.instancia.Position = UDim2.new(0, it.x, 0, it.y)
+
+            local metadeItem = it.tamanho / 2
+            local metadeBoneco = bonecoSize / 2
+            local colide = math.abs(it.x - bonecoX) < (metadeItem + metadeBoneco) * 0.9
+                and math.abs(it.y - bonecoY) < (metadeItem + metadeBoneco) * 0.9
+
+            if colide and not it.pego then
+                it.pego = true
+                it.instancia:Destroy()
+                table.remove(itensAtivos, i)
+
+                if it.ehFruta then
+                    somFruta.TimePosition = 0
+                    somFruta:Play()
+                    pontos = pontos + 1
+                    totalPego = totalPego + 1
+                    atualizarPlacar()
+                    if pontos >= META_FRUTAS then
+                        jogoConcluido = true
+                        conHeartbeatF:Disconnect()
+                        conInputBeganF:Disconnect()
+                        conInputEndedF:Disconnect()
+                        for _, restante in ipairs(itensAtivos) do
+                            if restante.instancia then
+                                restante.instancia:Destroy()
+                            end
+                        end
+                        guiFrutas:Destroy()
+                        abrirPerguntaIdade()
+                    end
+                else
+                    penalidade()
+                end
+            elseif it.y - metadeItem > PLAY_H then
+                -- saiu da tela sem ser pego, some sem penalidade
+                it.instancia:Destroy()
+                table.remove(itensAtivos, i)
+            end
+        end
+    end)
+end
+
+----------------------------------------------------------------
+-- ETAPA 2: LABIRINTO
+----------------------------------------------------------------
+-- Mapa em "serpentina": um único caminho garantido, sem atalhos.
+-- S = início, E = fim, # = parede, . = caminho livre
+local MAPA_LABIRINTO = {
+    "#############",
+    "#S..........#",
+    "###########.#",
+    "#...........#",
+    "#.###########",
+    "#...........#",
+    "###########.#",
+    "#E..........#",
+    "#############",
+}
+
+local CELL_SIZE = 34
+
+local function abrirLabirinto()
+    local guiLab = Instance.new("ScreenGui")
+    guiLab.Name = "PeterLabirintoGui"
+    guiLab.ResetOnSpawn = false
+    guiLab.IgnoreGuiInset = true
+    guiLab.DisplayOrder = 999
+    guiLab.Parent = playerGui
+
+    local rodandoLab = true
+
+    local overlayLab = Instance.new("Frame")
+    overlayLab.Size = UDim2.new(1, 0, 1, 0)
+    overlayLab.BackgroundColor3 = Color3.fromRGB(5, 5, 10)
+    overlayLab.BackgroundTransparency = 0.15
+    overlayLab.ZIndex = 1
+    overlayLab.Parent = guiLab
+
+    local instrucao = Instance.new("TextLabel")
+    instrucao.Size = UDim2.new(1, -40, 0, 40)
+    instrucao.Position = UDim2.new(0.5, 0, 0, 20)
+    instrucao.AnchorPoint = Vector2.new(0.5, 0)
+    instrucao.BackgroundTransparency = 1
+    instrucao.Text = "Use WASD ou as SETAS para levar a minhoca até o ✅ verde. Se encostar na parede, volta pro início!"
+    instrucao.TextColor3 = Color3.fromRGB(255, 255, 255)
+    instrucao.Font = Enum.Font.GothamBold
+    instrucao.TextScaled = true
+    instrucao.TextWrapped = true
+    instrucao.ZIndex = 2
+    instrucao.Parent = guiLab
+
+    local larguraMapa = #MAPA_LABIRINTO[1] * CELL_SIZE
+    local alturaMapa = #MAPA_LABIRINTO * CELL_SIZE
+
+    local mazeContainer = Instance.new("Frame")
+    mazeContainer.Name = "MazeContainer"
+    mazeContainer.AnchorPoint = Vector2.new(0.5, 0.5)
+    mazeContainer.Position = UDim2.new(0.5, 0, 0.5, 10)
+    mazeContainer.Size = UDim2.new(0, larguraMapa, 0, alturaMapa)
+    mazeContainer.BackgroundColor3 = Color3.fromRGB(15, 12, 20)
+    mazeContainer.ClipsDescendants = false
+    mazeContainer.ZIndex = 2
+    mazeContainer.Parent = guiLab
+
+    local mazeCorner = Instance.new("UICorner")
+    mazeCorner.CornerRadius = UDim.new(0, 10)
+    mazeCorner.Parent = mazeContainer
+
+    local mazeStroke = Instance.new("UIStroke")
+    mazeStroke.Color = Color3.fromRGB(255, 60, 90)
+    mazeStroke.Thickness = 3
+    mazeStroke.Parent = mazeContainer
+
+    local paredes = {}
+    local posInicio, posFim
+
+    for linha = 1, #MAPA_LABIRINTO do
+        local textoLinha = MAPA_LABIRINTO[linha]
+        for coluna = 1, #textoLinha do
+            local charAtual = textoLinha:sub(coluna, coluna)
+            local x = (coluna - 1) * CELL_SIZE
+            local y = (linha - 1) * CELL_SIZE
+
+            if charAtual == "#" then
+                local parede = Instance.new("Frame")
+                parede.Size = UDim2.new(0, CELL_SIZE, 0, CELL_SIZE)
+                parede.Position = UDim2.new(0, x, 0, y)
+                parede.BackgroundColor3 = Color3.fromRGB(120, 30, 60)
+                parede.BorderSizePixel = 0
+                parede.ZIndex = 3
+                parede.Parent = mazeContainer
+
+                local paredeGrad = Instance.new("UIGradient")
+                paredeGrad.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 40, 80)),
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 20, 40)),
+                })
+                paredeGrad.Rotation = 90
+                paredeGrad.Parent = parede
+
+                table.insert(paredes, {x = x, y = y, size = CELL_SIZE})
+            elseif charAtual == "S" then
+                posInicio = {x = x, y = y}
+            elseif charAtual == "E" then
+                posFim = {x = x, y = y}
+            end
+        end
+    end
+
+    -- Marcador do início (bem discreto)
+    local marcadorInicio = Instance.new("Frame")
+    marcadorInicio.Size = UDim2.new(0, CELL_SIZE, 0, CELL_SIZE)
+    marcadorInicio.Position = UDim2.new(0, posInicio.x, 0, posInicio.y)
+    marcadorInicio.BackgroundColor3 = Color3.fromRGB(80, 140, 255)
+    marcadorInicio.BackgroundTransparency = 0.5
+    marcadorInicio.BorderSizePixel = 0
+    marcadorInicio.ZIndex = 2
+    marcadorInicio.Parent = mazeContainer
+
+    -- Marcador do fim (verde, com ✅)
+    local marcadorFim = Instance.new("Frame")
+    marcadorFim.Size = UDim2.new(0, CELL_SIZE, 0, CELL_SIZE)
+    marcadorFim.Position = UDim2.new(0, posFim.x, 0, posFim.y)
+    marcadorFim.BackgroundColor3 = Color3.fromRGB(60, 220, 100)
+    marcadorFim.BackgroundTransparency = 0.3
+    marcadorFim.BorderSizePixel = 0
+    marcadorFim.ZIndex = 2
+    marcadorFim.Parent = mazeContainer
+
+    local labelFim = Instance.new("TextLabel")
+    labelFim.Size = UDim2.new(1, 0, 1, 0)
+    labelFim.BackgroundTransparency = 1
+    labelFim.Text = "✅"
+    labelFim.TextScaled = true
+    labelFim.ZIndex = 2
+    labelFim.Parent = marcadorFim
+
+    task.spawn(function()
+        while rodandoLab and marcadorFim.Parent do
+            local t1 = TweenService:Create(marcadorFim, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {BackgroundTransparency = 0.7})
+            t1:Play()
+            t1.Completed:Wait()
+            local t2 = TweenService:Create(marcadorFim, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {BackgroundTransparency = 0.3})
+            t2:Play()
+            t2.Completed:Wait()
+        end
+    end)
+
+    -- A minhoca (worm)
+    local minhocaSize = CELL_SIZE * 0.7
+    local minhoca = Instance.new("Frame")
+    minhoca.Name = "Minhoca"
+    minhoca.Size = UDim2.new(0, minhocaSize, 0, minhocaSize)
+    minhoca.AnchorPoint = Vector2.new(0.5, 0.5)
+    minhoca.Position = UDim2.new(0, posInicio.x + CELL_SIZE / 2, 0, posInicio.y + CELL_SIZE / 2)
+    minhoca.BackgroundColor3 = Color3.fromRGB(150, 255, 120)
+    minhoca.BorderSizePixel = 0
+    minhoca.ZIndex = 4
+    minhoca.Parent = mazeContainer
+
+    local minhocaCorner = Instance.new("UICorner")
+    minhocaCorner.CornerRadius = UDim.new(1, 0)
+    minhocaCorner.Parent = minhoca
+
+    local minhocaStroke = Instance.new("UIStroke")
+    minhocaStroke.Color = Color3.fromRGB(40, 100, 30)
+    minhocaStroke.Thickness = 2
+    minhocaStroke.Parent = minhoca
+
+    -- Posição real (em pixels, relativa ao canto superior esquerdo do mazeContainer)
+    local posX = posInicio.x + CELL_SIZE / 2
+    local posY = posInicio.y + CELL_SIZE / 2
+    local velocidade = 160 -- pixels por segundo
+
+    local teclas = {
+        w = false, a = false, s = false, d = false,
+        up = false, left = false, down = false, right = false,
+    }
+
+    local function mapKey(keyCode)
+        if keyCode == Enum.KeyCode.W then return "w"
+        elseif keyCode == Enum.KeyCode.A then return "a"
+        elseif keyCode == Enum.KeyCode.S then return "s"
+        elseif keyCode == Enum.KeyCode.D then return "d"
+        elseif keyCode == Enum.KeyCode.Up then return "up"
+        elseif keyCode == Enum.KeyCode.Left then return "left"
+        elseif keyCode == Enum.KeyCode.Down then return "down"
+        elseif keyCode == Enum.KeyCode.Right then return "right"
+        end
+        return nil
+    end
+
+    local conexaoInputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        local k = mapKey(input.KeyCode)
+        if k then teclas[k] = true end
+    end)
+
+    local conexaoInputEnded = UserInputService.InputEnded:Connect(function(input, gameProcessed)
+        local k = mapKey(input.KeyCode)
+        if k then teclas[k] = false end
+    end)
+
+    -- checa se um quadrado (px,py,tam) toca em alguma parede
+    local function tocaParede(px, py, tam)
+        local metade = tam / 2
+        local esquerda, direita = px - metade, px + metade
+        local topo, base = py - metade, py + metade
+
+        for _, p in ipairs(paredes) do
+            local pEsq, pDir = p.x, p.x + p.size
+            local pTopo, pBase = p.y, p.y + p.size
+            if esquerda < pDir and direita > pEsq and topo < pBase and base > pTopo then
+                return true
+            end
+        end
+        return false
+    end
+
+    local function resetarMinhoca()
+        posX = posInicio.x + CELL_SIZE / 2
+        posY = posInicio.y + CELL_SIZE / 2
+        minhoca.Position = UDim2.new(0, posX, 0, posY)
+        TweenService:Create(minhocaStroke, TweenInfo.new(0.15), {Color = Color3.fromRGB(255, 60, 60), Thickness = 4}):Play()
+        task.delay(0.3, function()
+            if minhocaStroke.Parent then
+                TweenService:Create(minhocaStroke, TweenInfo.new(0.15), {Color = Color3.fromRGB(40, 100, 30), Thickness = 2}):Play()
+            end
+        end)
+    end
+
+    local labirintoConcluido = false
+
+    local conexaoHeartbeat
+    conexaoHeartbeat = RunService.Heartbeat:Connect(function(dt)
+        if labirintoConcluido then return end
+
+        local dx, dy = 0, 0
+        if teclas.w or teclas.up then dy -= 1 end
+        if teclas.s or teclas.down then dy += 1 end
+        if teclas.a or teclas.left then dx -= 1 end
+        if teclas.d or teclas.right then dx += 1 end
+
+        if dx ~= 0 or dy ~= 0 then
+            local comprimento = math.sqrt(dx * dx + dy * dy)
+            dx = (dx / comprimento) * velocidade * dt
+            dy = (dy / comprimento) * velocidade * dt
+
+            local novoX = math.clamp(posX + dx, CELL_SIZE * 0.35, larguraMapa - CELL_SIZE * 0.35)
+            local novoY = math.clamp(posY + dy, CELL_SIZE * 0.35, alturaMapa - CELL_SIZE * 0.35)
+
+            if tocaParede(novoX, novoY, minhocaSize) then
+                labirintoConcluido = true -- trava por um instante pra não resetar em loop
+                resetarMinhoca()
+                task.delay(0.05, function() labirintoConcluido = false end)
+            else
+                posX, posY = novoX, novoY
+                minhoca.Position = UDim2.new(0, posX, 0, posY)
+            end
+        end
+
+        -- Chegou no fim?
+        local distX = math.abs(posX - (posFim.x + CELL_SIZE / 2))
+        local distY = math.abs(posY - (posFim.y + CELL_SIZE / 2))
+        if distX < CELL_SIZE * 0.5 and distY < CELL_SIZE * 0.5 then
+            labirintoConcluido = true
+            rodandoLab = false
+            conexaoHeartbeat:Disconnect()
+            conexaoInputBegan:Disconnect()
+            conexaoInputEnded:Disconnect()
+            guiLab:Destroy()
+            abrirJogoFrutas()
+        end
+    end)
+end
+
+----------------------------------------------------------------
+-- LÓGICA DE VALIDAÇÃO DA KEY (dispara o labirinto ao acertar)
 ----------------------------------------------------------------
 local function verificarKey()
     local textoDigitado = inputBox.Text:lower():gsub("%s+", "") -- remove espaços e deixa minúsculo
 
     if textoDigitado == RESPOSTA_CORRETA then
         erroLabel.Visible = false
-        animacaoSucesso()
+        ativoKeyGui = false
+        screenGui:Destroy()
+        abrirLabirinto()
     else
-        shakeErro()
+        shakeFrame(frame, erroLabel)
     end
 end
 
